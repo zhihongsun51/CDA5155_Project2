@@ -8,6 +8,7 @@
 #include <map>
 #include <stack>
 #include <vector>
+#include <string.h>
 
 int pc = 256;
 int counter = 1;
@@ -20,6 +21,7 @@ std::map<int, std::string> instructions_map; //Keeps track of all instructions f
 std::map<int, std::string> funct_map; //Functions map
 std::map<int, int> data_map; //Keeps track of all data
 std::map<int, std::string> dfunct_map; //Disassembly function map
+char funct[128];
 
 int convert_offset(std::string offset){
     int dec_offset;
@@ -34,24 +36,25 @@ int convert_offset(std::string offset){
     return dec_offset;
 }
 
-void ins_buf1(char *buff_funct){
+void jump(std::string line){
+    int dest = std::bitset<32>(line).to_ulong();
+    dest <<= 2;
+    sprintf(funct, "%32s \t %d \t J #%d \n", instructions_map[pc].c_str(), pc, dest);
+    funct_map[pc] = funct;
+    pc = dest - 4;
+}
+
+void ins_bu(char *buff_funct){
     if(buf1.size() < 8){
         buf1.push_back(std::string(buff_funct));
     }
 }
 
-void category_1(std::string line, int msb, int opcode){
+void category_1(std::string line, int opcode){
     int dest, src1, src2, offset;
-    char funct[128];
     switch(opcode){
     case 0: //J 
-        dest = std::bitset<32>(line).to_ulong();
-        dest <<= 2;
-        
-        //put formatted string into a map for later use
-        sprintf(funct, "%32s \t %d \t J #%d \n", instructions_map[pc].c_str(), pc, dest);
-        funct_map[pc] = funct;
-        pc = dest - 4;
+        jump(line);
         break;
     case 1: //BEQ
         src1 = std::bitset<5>(line.substr(0,5)).to_ulong();
