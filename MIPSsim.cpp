@@ -139,11 +139,11 @@ void category_1(std::string line, int opcode){
     std::string f(funct);
     f.erase(0, 35);
     current_inst = f;
+    memset(funct, 0, 128);
 }
 
 
-void category_2(std::string line, int msb, int opcode){
-    char funct[128];
+void category_2(std::string line, int opcode){
     char buff_funct[128];
     std::string inst;
     int dest = std::bitset<5>(line.substr(0,5)).to_ulong();
@@ -199,10 +199,10 @@ void category_2(std::string line, int msb, int opcode){
     funct_map[pc] = funct;
     f.erase(0, 35);
     current_inst = f;
+    memset(funct, 0, 128);
 }
 
-void category_3(std::string line, int msb, int opcode){
-    char funct[128];
+void category_3(std::string line, int opcode){
     std::string inst;
     int dest = std::bitset<5>(line.substr(0,5)).to_ulong();
     line.erase(0,5);
@@ -233,10 +233,10 @@ void category_3(std::string line, int msb, int opcode){
     funct_map[pc] = funct;
     f.erase(0, 35);
     current_inst = f;
+    memset(funct, 0, 128);
 }
 
-void category_4(std::string line, int msb, int opcode){
-    char funct[128];
+void category_4(std::string line, int opcode){
     std::string inst;
     int src1 = std::bitset<5>(line.substr(0,5)).to_ulong();
     line.erase(0,5);
@@ -271,10 +271,10 @@ void category_4(std::string line, int msb, int opcode){
     funct_map[pc] = funct;
     f.erase(0, 35);
     current_inst = f;
+    memset(funct, 0, 128);
 }
 
-void category_5(std::string line, int msb, int opcode){
-    char funct[128];
+void category_5(std::string line, int opcode){
     std::string inst;
     int dest = std::bitset<5>(line.substr(0,5)).to_ulong();
     switch(opcode){
@@ -296,15 +296,16 @@ void category_5(std::string line, int msb, int opcode){
     funct_map[pc] = funct;
     f.erase(0, 35);
     current_inst = f;
+    memset(funct, 0, 128);
 }
 
 //Puts data into map
 void input_data(std::string line, int pc){
-    char funct[128];
     int data = std::bitset<32>(line).to_ulong();
     data_map[pc] = data;
     sprintf(funct, "%32s \t %d \t %d \n", line.c_str(), pc, data);
     dfunct_map[pc] = funct;
+    memset(funct, 0, 128);
 }
 
 //Handles disassembly formatting
@@ -365,23 +366,23 @@ void i_fetch(std::string line){
     switch(msb){
     case 0:
         line.erase(0,6);
-        category_1(line, msb, opcode);
+        category_1(line, opcode);
         break;
     case 1:
         line.erase(0,6);
-        category_2(line, msb, opcode);
+        category_2(line, opcode);
         break;
     case 2:
         line.erase(0,6);
-        category_3(line, msb, opcode);
+        category_3(line, opcode);
         break;
     case 3:
         line.erase(0,6);
-        category_4(line, msb, opcode);
+        category_4(line, opcode);
         break;
     case 4:
         line.erase(0,6);   
-        category_5(line, msb, opcode);
+        category_5(line, opcode);
         break;
     default:
         break;
