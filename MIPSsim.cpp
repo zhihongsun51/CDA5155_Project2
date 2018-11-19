@@ -14,14 +14,24 @@ int pc = 256;
 int counter = 1;
 std::string current_inst;
 int registers[32];
-std::vector<std::string> buf1, buf2, buf3, buf4, buf5;
-std::string buf7, buf8, buf9, buf10, buf11, buf12;
 int hiLo[2]; //HI is stored in 0, LO is stored in 1
+std::map<int, int> register_map; //Keeps track of registers in use. 1 if it is 0 if not
 std::map<int, std::string> instructions_map; //Keeps track of all instructions for jumps
 std::map<int, std::string> funct_map; //Functions map
 std::map<int, int> data_map; //Keeps track of all data
 std::map<int, std::string> dfunct_map; //Disassembly function map
 char funct[128];
+
+struct buff_entry{
+    int dest;
+    int src1;
+    int src2;
+    int offset;
+    int imm_val;
+};
+
+std::vector<buff_entry> buf1, buf2, buf3, buf4, buf5;
+std::string buf7, buf8, buf9, buf10, buf11, buf12;
 
 int convert_offset(std::string offset){
     int dec_offset;
