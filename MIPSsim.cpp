@@ -23,12 +23,12 @@ std::map<int, std::string> dfunct_map; //Disassembly function map
 char funct[128];
 
 struct buff_entry{
-    std::string inst;
-    int dest, src1, src2, offset, imm_val;
+    std::string inst, entry;
+    int cat, opcode, dest, src1, src2, offset, imm_val, result;
 };
 
 std::vector<buff_entry> buf1, buf2, buf3, buf4, buf5;
-buff_entry buf7, buf8, buf9, buf10, buf11, buf12;
+std::vector<buff_entry> buf7, buf8, buf9, buf10, buf11, buf12;
 
 int convert_offset(std::string offset){
     int dec_offset;
@@ -103,6 +103,16 @@ void ins_buf1(buff_entry b){
     }
 }
 
+void ins_buf5(std::vector<buff_entry>::iterator it, buff_entry b){
+    buf5.push_back(b);
+    buf1.erase(it);
+}
+
+void ins_buf9(std::vector<buff_entry>::iterator it, buff_entry b){
+    buf9.push_back(b);
+    buf5.erase(it);
+}
+
 void category_1(std::string line, int opcode){
     int dest, src1, src2, offset;
     switch(opcode){
@@ -163,7 +173,10 @@ void category_1(std::string line, int opcode){
 
 
 void category_2(std::string line, int opcode){
+    char buff_funct[128];
     buff_entry b;
+    b.cat = 2;
+    b.opcode = opcode;
     std::string inst;
     b.dest = std::bitset<5>(line.substr(0,5)).to_ulong();
     line.erase(0,5);
@@ -175,79 +188,83 @@ void category_2(std::string line, int opcode){
     switch(opcode){
     case 0: //ADD
         b.inst = "ADD";
-        registers[b.dest] = registers[b.src1] + registers[b.src2];
         sprintf(funct, "%32s \t %d \t %s R%d, R%d, R%d \n", instructions_map[pc].c_str(), pc, b.inst.c_str(), b.dest, b.src1, b.src2);
+        sprintf(buff_funct, "[%s R%d, R%d, R%d]", b.inst.c_str(), b.dest, b.src1, b.src2);
         break;
     case 1: //SUB
         inst = "SUB";
-        registers[b.dest] = registers[b.src1] - registers[b.src2];
         sprintf(funct, "%32s \t %d \t %s R%d, R%d, R%d \n", instructions_map[pc].c_str(), pc, inst.c_str(), b.dest, b.src1, b.src2);
+        sprintf(buff_funct, "[%s R%d, R%d, R%d]", b.inst.c_str(), b.dest, b.src1, b.src2);
         break;
     case 2: //AND
         inst = "AND";
-        registers[b.dest] = registers[b.src1] & registers[b.src2];
         sprintf(funct, "%32s \t %d \t %s R%d, R%d, R%d \n", instructions_map[pc].c_str(), pc, inst.c_str(), b.dest, b.src1, b.src2);
+        sprintf(buff_funct, "[%s R%d, R%d, R%d]", b.inst.c_str(), b.dest, b.src1, b.src2);
         break;
     case 3: //OR
         inst = "OR";
-        registers[b.dest] = registers[b.src1] | registers[b.src2];
         sprintf(funct, "%32s \t %d \t %s R%d, R%d, R%d \n", instructions_map[pc].c_str(), pc, inst.c_str(), b.dest, b.src1, b.src2);
+        sprintf(buff_funct, "[%s R%d, R%d, R%d]", b.inst.c_str(), b.dest, b.src1, b.src2);
         break;
     case 4: //SRL
         inst = "SRL";
-        registers[b.dest] = (unsigned int)(registers[b.src1]) >> b.src2;
         sprintf(funct, "%32s \t %d \t %s R%d, R%d, #%d \n", instructions_map[pc].c_str(), pc, inst.c_str(), b.dest, b.src1, b.src2);
+        sprintf(buff_funct, "[%s R%d, R%d, #%d]", b.inst.c_str(), b.dest, b.src1, b.src2);
         break;
     case 5: //SRA
         inst = "SRA";
-        registers[b.dest] = registers[b.src1] >> b.src2;
         sprintf(funct, "%32s \t %d \t %s R%d, R%d, #%d \n", instructions_map[pc].c_str(), pc, inst.c_str(), b.dest, b.src1, b.src2);
+        sprintf(buff_funct, "[%s R%d, R%d, #%d]", b.inst.c_str(), b.dest, b.src1, b.src2);
         break;
     default:
         break;
     }
-    
+    b.entry = std::string(buff_funct);
     //put formatted string into a map for later use
     std::string f(funct);
     funct_map[pc] = funct;
     f.erase(0, 35);
     current_inst = f;
     memset(funct, 0, 128);
+    memset(buff_funct, 0, 128);
     ins_buf1(b);
 }
 
 void category_3(std::string line, int opcode){
-    std::string inst;
-    int dest = std::bitset<5>(line.substr(0,5)).to_ulong();
+    char buff_funct[128];
+    buff_entry b;
+    b.cat = 3;
+    b.dest = std::bitset<5>(line.substr(0,5)).to_ulong();
     line.erase(0,5);
-    int src1 = std::bitset<5>(line.substr(0,5)).to_ulong();
+    b.src1 = std::bitset<5>(line.substr(0,5)).to_ulong();
     line.erase(0,5);
-    int imm_val = convert_offset(line);
+    b.imm_val = convert_offset(line);
 
     switch(opcode){
     case 0: //ADDI
-        inst = "ADDI";
-        registers[dest] = registers[src1] + imm_val;
+        b.inst = "ADDI";
         break;
     case 1: //ANDI
-        inst = "ANDI";
-        registers[dest] = registers[src1] & imm_val;
+        b.inst = "ANDI";
         break;
     case 2: //ORI
-        inst = "ORI";
-        registers[dest] = registers[src1] | imm_val;
+        b.inst = "ORI";
         break;
     default:
         break;
     }
 
     //put formatted string into a map for later use
-    sprintf(funct, "%32s \t %d \t %s R%d, R%d, #%d \n", instructions_map[pc].c_str(), pc, inst.c_str(), dest, src1, imm_val);
+    sprintf(funct, "%32s \t %d \t %s R%d, R%d, #%d \n", instructions_map[pc].c_str(), pc, b.inst.c_str(), b.dest, b.src1, b.imm_val);
+    sprintf(buff_funct, "[%s R%d, R%d, #%d]", b.inst.c_str(), b.dest, b.src1, b.imm_val);
+    b.entry = std::string(buff_funct);
     std::string f(funct);
     funct_map[pc] = funct;
     f.erase(0, 35);
     current_inst = f;
     memset(funct, 0, 128);
+    memset(buff_funct, 0, 128);
+    ins_buf1(b);
 }
 
 void category_4(std::string line, int opcode){
@@ -273,7 +290,7 @@ void category_4(std::string line, int opcode){
     case 1:
         inst = "DIV";
         hiLo[0] = registers[src1] / registers[src2];
-        hiLo[0] = registers[src1] % registers[src2];
+        hiLo[1] = registers[src1] % registers[src2];
         break;
     default:
         break;
@@ -289,28 +306,32 @@ void category_4(std::string line, int opcode){
 }
 
 void category_5(std::string line, int opcode){
-    std::string inst;
-    int dest = std::bitset<5>(line.substr(0,5)).to_ulong();
+    char buff_funct[128];
+    buff_entry b;
+    b.dest = std::bitset<5>(line.substr(0,5)).to_ulong();
     switch(opcode){
     case 0: 
-        inst = "MFHI";
-        registers[dest] = hiLo[0];
+        b.inst = "MFHI";
+        registers[b.dest] = hiLo[0];
         break;
     case 1:
-        inst = "MFLO";
-        registers[dest] = hiLo[1];
+        b.inst = "MFLO";
+        registers[b.dest] = hiLo[1];
         break;
     default:
         break;
     }
 
     //put formatted string into a map for later use
-    sprintf(funct, "%32s \t %d \t %s R%d \n", instructions_map[pc].c_str(), pc, inst.c_str(), dest);
+    sprintf(funct, "%32s \t %d \t %s R%d \n", instructions_map[pc].c_str(), pc, b.inst.c_str(), b.dest);
+    sprintf(buff_funct, "[%s R%d]", b.inst.c_str(), b.dest);
+    b.entry = std::string(buff_funct);
     std::string f(funct);
     funct_map[pc] = funct;
     f.erase(0, 35);
     current_inst = f;
     memset(funct, 0, 128);
+    memset(buff_funct, 0, 128);
 }
 
 //Puts data into map
@@ -340,13 +361,39 @@ void simulation_output(){
     char first_line[50];
     std::string reg = "";
     std::string data = "";
+    std::string buffer1 = "";
+    std::string buffer5 = "";
+    std::string buffer9 = "";
     char temp[128];
     char line_break[128] = "--------------------\n";
     sprintf(first_line, "Cycle %d\n", counter);
+    for(int i = 0; i < 8; i++){
+        sprintf(temp, "\n\tEntry %d:\t", i);
+        buffer1 += temp;
+        if(buf1.size() > i){
+            sprintf(temp, "%s", buf1[i].entry.c_str());
+            buffer1 += temp;
+        }
+    }
+    for(int i = 0; i < 2; i++){
+        sprintf(temp, "\n\tEntry %d:\t", i);
+        buffer5 += temp;
+        if(buf5.size() > i){
+            sprintf(temp, "%s", buf5[i].entry.c_str());
+            buffer5 += temp;
+        }
+    }
+    if(buf9.size() > 0){
+        sprintf(temp, "%s", buf9[0].entry.c_str());
+        buffer9 += temp;
+    }
+    buffer1 += "\n";
+    buffer5 += "\n";
+    buffer9 += "\n";
     for(int i = 0; i < 32; i++){
         if(i % 8 == 0){
-        sprintf(temp, "\nR%02d:\t", i);
-        reg += temp;
+            sprintf(temp, "\nR%02d:\t", i);
+            reg += temp;
         }
         sprintf(temp, "%d\t", registers[i]);
         reg += temp;
@@ -365,6 +412,13 @@ void simulation_output(){
     simulation.open("simulation.txt", std::ios_base::app);
     simulation << line_break;
     simulation << first_line;
+    //simulation << "IF:";
+    simulation << "Buf1:";
+    simulation << buffer1;
+    simulation << "Buf5";
+    simulation << buffer5;
+    simulation << "Buf9:\t";
+    simulation << buffer9;
     simulation << "Registers";
     simulation << reg;
     simulation << "\n\n";
@@ -403,11 +457,129 @@ void i_fetch(std::string line){
     }
 }
 
-void i_issue(std::vector<buff_entry> buf1){
+void i_issue(){
+    for(std::vector<buff_entry>::iterator it = buf1.begin(); it != buf1.end(); ++it){
+        buff_entry b = *it;
+        switch(b.cat){
+        case 1:
+            break;
+        case 2:
+            if(buf5.size() < 2){
+                if(register_map[b.dest] == 0 && register_map[b.src1] == 0){
+                    if(b.opcode == 4 || b.opcode == 5){
+                        ins_buf5(it, b);
+                        register_map[b.dest] = 1;
+                    } else {
+                        if(register_map[b.src2] == 0){
+                            ins_buf5(it, b);
+                            register_map[b.dest] = 1;
+                        }
+                    }
+                }
+                
+            }
+            break;
+        case 3:
+            if(buf5.size() < 2){
+                if(register_map[b.dest] == 0 && register_map[b.src1] == 0){
+                    ins_buf5(it, b);
+                    register_map[b.dest] = 1;
+                }
+                
+            }
+            break;
+        case 4:
+            break;
+        case 5:
+            break;    
+        
+        }
+        if(it == buf1.end()){
+            break;
+        }
+    }
+}
 
+void ex_alu1(){
+    for(std::vector<buff_entry>::iterator it = buf5.begin(); it != buf5.end(); ++it){
+        char buff_funct[128];
+        buff_entry b = *it;
+        switch(b.cat){
+        case 2:
+            switch(b.opcode){
+            case 0: //ADD
+                b.result = registers[b.src1] + registers[b.src2];
+                break;
+            case 1: //SUB
+                b.result = registers[b.src1] - registers[b.src2];
+                break;
+            case 2: //AND
+                b.result = registers[b.src1] & registers[b.src2];
+                break;
+            case 3: //OR
+                b.result = registers[b.src1] | registers[b.src2];
+                break;
+            case 4: //SRL
+                b.result = (unsigned int)(registers[b.src1]) >> b.src2;
+                break;
+            case 5: //SRA
+                b.result = registers[b.src1] >> b.src2;
+                break;
+            default:
+                break;
+            }
+            break;
+        case 3:
+            switch(b.opcode){
+            case 0: //ADDI
+                b.result = registers[b.src1] + b.imm_val;
+                break;
+            case 1: //ANDI
+                b.result = registers[b.src1] & b.imm_val;
+                break;
+            case 2: //ORI
+                b.result = registers[b.src1] | b.imm_val;
+                break;
+            default:
+                break;
+            }
+            break;
+        case 5:
+            switch(b.opcode){
+            case 0: 
+                b.result = hiLo[0];
+                break;
+            case 1:
+                b.result = hiLo[1];
+                break;
+            default:
+                break;
+            }
+        }
+        
+        sprintf(buff_funct, "[%d, R%d]", b.result, b.dest);
+        b.entry = std::string(buff_funct);
+        ins_buf9(it, b);
+        if(it == buf5.end()){
+            break;
+        }
+    }
+}
+
+void write_back(){
+    //std::cout << "testing";
+    if(buf9.size() > 0){
+        registers[buf9[0].dest] = buf9[0].result;
+        register_map[buf9[0].dest] = 0;
+        buf9.erase(buf9.begin());
+    }
 }
 
 int main(int argc, char* argv[]){
+    for(int i = 0; i < 32; i++){
+        register_map.insert(std::pair<int, int>(i, 0)); //Initialize all registers as unused
+    }
+
     if(remove( "simulation.txt" ) == 0);
     if(remove( "disassembly.txt" ) == 0);
     int pc_data = 256;
@@ -454,20 +626,23 @@ int main(int argc, char* argv[]){
     
     //Executing the instructions
     while(instructions_map.find(pc) != instructions_map.end()){
+        write_back();
+        if(buf9.size() < 1){
+            ex_alu1();
+        }
+        for(int i = 0; i < 2; i++){
+            i_issue();
+        }
         for(int i = 0; i < 4; i++){
-            i_issue(buf1);
             i_fetch(instructions_map[pc]);
-            simulation_output();
-            counter ++;
             pc += 4;
             if(instructions_map.find(pc) == instructions_map.end())
                 break;
         }
+        simulation_output();
+        counter++;
     }
 
     disassembly_output();
-
-    int as;
-    std::cout << as;
     return 0;
 }
