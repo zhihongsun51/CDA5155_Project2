@@ -15,11 +15,15 @@ int counter = 1;
 int stalled = 0; //If function is stalled dont pull any more instructions
 std::string current_inst;
 int registers[32];
+int prev_registers[32];
 int hiLo[2]; //HI is stored in 0, LO is stored in 1
+int prev_hiLo[2];
 std::map<int, int> register_map; //Keeps track of registers in use. 1 if it is 0 if not
+std::map<int, int> prev_dirty;
 std::map<int, std::string> instructions_map; //Keeps track of all instructions for jumps
 std::map<int, std::string> funct_map; //Functions map
 std::map<int, int> data_map; //Keeps track of all data
+std::map<int, int> prev_data; //Data from cycle before.
 std::map<int, std::string> dfunct_map; //Disassembly function map
 char funct[128];
 
@@ -28,9 +32,16 @@ struct buff_entry{
     int cat, opcode, dest, src1, src2, offset, imm_val, result;
     bool isWaiting, self_dirty;
 };
+//size of buffer from previous cycle
+struct prev_cycle{
+    int bb_size, b1_size, b2_size, b3_size, b4_size, b5_size, b6_size, b7_size, b8_size, b9_size, b10_size, b11_size, b12_size;
+};
 
 std::vector<buff_entry> bbuf, buf1, buf2, buf3, buf4, buf5, buf6;
 std::vector<buff_entry> buf7, buf8, buf9, buf10, buf11, buf12;
+
+std::vector<buff_entry> pbbuf, pbuf1, pbuf2, pbuf3, pbuf4, pbuf5, pbuf6;
+std::vector<buff_entry> pbuf7, pbuf8, pbuf9, pbuf10, pbuf11, pbuf12;
 
 int convert_offset(std::string offset){
     int dec_offset;
@@ -55,11 +66,19 @@ void ins_bbuf(buff_entry b){
 void ins_buf1(buff_entry b){
     if(buf1.size() < 8){
         buf1.push_back(b);
+    } else {
+        stalled = 1;
     }
 }
 
+//functions to push data into buffers
 void ins_buf2(std::vector<buff_entry>::iterator it, buff_entry b){
     buf2.push_back(b);
+    buf1.erase(it);
+}
+
+void ins_buf3(std::vector<buff_entry>::iterator it, buff_entry b){
+    buf3.push_back(b);
     buf1.erase(it);
 }
 
@@ -76,6 +95,11 @@ void ins_buf5(std::vector<buff_entry>::iterator it, buff_entry b){
 void ins_buf6(buff_entry b){
     buf6.push_back(b);
     buf2.erase(buf2.begin());
+}
+
+void ins_buf7(buff_entry b){
+    buf7.push_back(b);
+    buf3.erase(buf2.begin());
 }
 
 void ins_buf8(buff_entry b){
@@ -115,9 +139,9 @@ void category_1(std::string line, int opcode){
         sprintf(funct, "%32s \t %d \t J #%d \n", instructions_map[pc].c_str(), pc, b.dest);
         sprintf(buff_funct, "[J #%d]", b.dest);
         b.entry = std::string(buff_funct);
+        b.isWaiting = false;
         ins_bbuf(b);
         funct_map[pc] = funct;
-        pc = b.dest - 4;
         break;
     case 1: //BEQ
         b.src1 = std::bitset<5>(line.substr(0,5)).to_ulong();
@@ -133,6 +157,7 @@ void category_1(std::string line, int opcode){
         b.entry = std::string(buff_funct);
         ins_bbuf(b);
         funct_map[pc] = funct;
+        stalled = 1;
         break;
     case 2: //BNE
         b.src1 = std::bitset<5>(line.substr(0,5)).to_ulong();
@@ -148,9 +173,7 @@ void category_1(std::string line, int opcode){
         b.entry = std::string(buff_funct);
         ins_bbuf(b);
         funct_map[pc] = funct;
-        if(registers[b.src1] != registers[b.src2]){
-            pc = b.offset + pc;
-        }  
+        stalled = 1; 
         break;
     case 3: //BGTZ
         b.src1 = std::bitset<5>(line.substr(0,5)).to_ulong();
@@ -162,9 +185,9 @@ void category_1(std::string line, int opcode){
         sprintf(funct, "%32s \t %d \t BGTZ R%d, #%d \n", instructions_map[pc].c_str(), pc, b.src1, b.offset);
         sprintf(buff_funct, "[BGTZ R%d, #%d]", b.src1, b.offset);
         b.entry = std::string(buff_funct);
-        
         ins_bbuf(b);
         funct_map[pc] = funct;
+        stalled = 1;
         break;
     case 4: //SW
         b.dest = std::bitset<5>(line.substr(0,5)).to_ulong();
@@ -177,13 +200,19 @@ void category_1(std::string line, int opcode){
         sprintf(funct, "%32s \t %d \t SW R%d, %d(R%d) \n", instructions_map[pc].c_str(), pc, b.src1, b.offset, b.dest);
         sprintf(buff_funct, "[SW R%d, %d(R%d)]", b.src1, b.offset, b.dest);
         b.entry = std::string(buff_funct);
-        ins_buf1(b);
         if(register_map[b.dest] == 0 && register_map[b.src1] == 0){
             register_map[b.dest] = 1;
             b.isWaiting = false;
-        } else {
+        }
+        else if(register_map[b.dest] == 0 && register_map[b.src1] == 1){
+            register_map[b.dest] = 1;
+            b.isWaiting = true;
+            b.self_dirty = true;
+        } 
+        else {
             b.isWaiting = true;
         }
+        ins_buf1(b);
         funct_map[pc] = funct;
         break;
     case 5: //LW
@@ -355,8 +384,6 @@ void category_4(std::string line, int opcode){
         break;
     case 1:
         b.inst = "DIV";
-        hiLo[0] = registers[b.src1] / registers[b.src2];
-        hiLo[1] = registers[b.src1] % registers[b.src2];
         break;
     default:
         break;
@@ -463,8 +490,16 @@ void simulation_output(){
     std::string buffer10 = "";
     std::string buffer11 = "";
     std::string buffer12 = "";
+    std::string HI = "";
+    std::string LO = "" ;
     char temp[128];
     char line_break[128] = "--------------------\n";
+    sprintf(temp, "%d", hiLo[0]);
+    HI += temp;
+    HI += "\n";
+    sprintf(temp, "%d", hiLo[1]); 
+    LO += temp;
+    LO += "\n";
     sprintf(first_line, "Cycle %d\n", counter);
     IF += "\tWaiting:\t";
     if(!bbuf.empty() && bbuf[0].isWaiting){
@@ -562,7 +597,7 @@ void simulation_output(){
         sprintf(temp, "%d\t", it->second);
         data += temp;
     }
-    
+
     std::ofstream simulation;
     simulation.open("simulation.txt", std::ios_base::app);
     simulation << line_break;
@@ -593,47 +628,65 @@ void simulation_output(){
     simulation << "\n";
     simulation << "Registers";
     simulation << reg;
-    simulation << "HI:";
-    simulation << "LO:";
+    simulation << "\nHI:\t\t";
+    simulation << HI;
+    simulation << "LO:\t\t";
+    simulation << LO;
     simulation << "\n\n";
     simulation << "Data";
     simulation << data;
     simulation << "\n";
 }
-
+//branch needs to stall i_fetch
 void b_waiting(){
-    if(!bbuf[0].isWaiting){
+    if(bbuf.empty()){
+        stalled = 0;
+    } 
+    else if(!bbuf[0].isWaiting){
+        stalled = 0;
         bbuf.clear();
-    }
-    switch(bbuf[0].opcode){
-    case 1:
-        if(register_map[bbuf[0].src1] == 1 || register_map[bbuf[0].src2] == 1){
-            stalled = 1;
-            bbuf[0].isWaiting = true;
-        } else {
+    } else {
+        switch(bbuf[0].opcode){
+        case 0:
             stalled = 0;
             bbuf[0].isWaiting = false;
-            if(registers[bbuf[0].src1] == registers[bbuf[0].src2]){
-                pc = bbuf[0].offset + pc;
+            pc = bbuf[0].dest - 4;
+            bbuf.clear();
+            break;
+        case 1:
+            if(register_map[bbuf[0].src1] == 1 || register_map[bbuf[0].src2] == 1){
+                bbuf[0].isWaiting = true;
+            } else {
+                bbuf[0].isWaiting = false;
+                if(registers[bbuf[0].src1] == registers[bbuf[0].src2]){
+                    pc = bbuf[0].offset + pc;
+                }
             }
-        }
-        break;
-    case 3: //BGTZ
-        if(register_map[bbuf[0].src1] == 1){
-            stalled = 1;
-            bbuf[0].isWaiting = true;
-        } else {
-            stalled = 0;
-            bbuf[0].isWaiting = false;
-            if(registers[bbuf[0].src1] > 0){
-                pc = bbuf[0].offset + pc;
+            break;
+        case 2:
+            if(register_map[bbuf[0].src1] == 1 || register_map[bbuf[0].src2] == 1){
+                bbuf[0].isWaiting = true;
+            } else {
+                bbuf[0].isWaiting = false;
+                if(registers[bbuf[0].src1] != registers[bbuf[0].src2]){
+                    pc = bbuf[0].offset + pc;
+                } 
             }
+            break;
+        case 3: //BGTZ
+            if(register_map[bbuf[0].src1] == 1){
+                bbuf[0].isWaiting = true;
+            } else {
+                bbuf[0].isWaiting = false;
+                if(registers[bbuf[0].src1] > 0){
+                    pc = bbuf[0].offset + pc;
+                }
+            }
+            break;
         }
-        break;
     }
-    
 }
-
+//fetch instructions
 void i_fetch(std::string line){
     int msb = std::bitset<32>(line.substr(0,3)).to_ulong();
     int opcode = std::bitset<32>(line.substr(3,3)).to_ulong();
@@ -662,7 +715,7 @@ void i_fetch(std::string line){
         break;
     }
 }
-
+//issue instructions
 void i_issue(){
     for(std::vector<buff_entry>::iterator it = buf1.begin(); it != buf1.end(); ++it){
         buff_entry b = *it;
@@ -672,6 +725,19 @@ void i_issue(){
                 if(!b.isWaiting){
                     ins_buf2(it, b);
                     --it;
+                } else {
+                    if(register_map[b.dest] == 0 && register_map[b.src1] == 0){
+                        register_map[b.dest] = 1;
+                        b.isWaiting = false;
+                        ins_buf2(it, b);
+                        --it;
+                    }
+                    else if(register_map[b.dest] == 1 && register_map[b.src1] == 0 && b.self_dirty){
+                        register_map[b.dest] = 1;
+                        b.isWaiting = false;
+                        ins_buf2(it, b);
+                        --it;
+                    }
                 }
             }
             break;
@@ -685,14 +751,14 @@ void i_issue(){
                         if(register_map[b.dest] == 0 && register_map[b.src1] == 0 && register_map[b.src2] == 0){
                             register_map[b.dest] = 1;
                             b.isWaiting = false;
-                            ins_buf2(it, b);
+                            ins_buf5(it, b);
                             --it;
                         }
                     } else {
                         if(register_map[b.dest] == 0 && register_map[b.src1] == 0){
                             register_map[b.dest] = 1;
                             b.isWaiting = false;
-                            ins_buf2(it, b);
+                            ins_buf5(it, b);
                             --it;
                         }
                     }
@@ -718,13 +784,28 @@ void i_issue(){
             if(b.opcode == 0){
                 if(buf4.size() < 2){
                     if(!b.isWaiting){
-                        ins_buf5(it, b);
+                        ins_buf4(it, b);
+                        --it;
+                    } else {
+                        if(prev_dirty[b.src1] == 0 && prev_dirty[b.src2] == 0){
+                            register_map[32] = 1;
+                            b.isWaiting = false;
+                            ins_buf4(it, b);
+                            --it;
+                        }
+                    }
+                }
+            }
+            if(b.opcode == 1){
+                if(buf3.size() < 2){
+                    if(!b.isWaiting){
+                        ins_buf3(it, b);
                         --it;
                     } else {
                         if(register_map[b.src1] == 0 && register_map[b.src2] == 0){
                             register_map[32] = 1;
                             b.isWaiting = false;
-                            ins_buf4(it, b);
+                            ins_buf3(it, b);
                             --it;
                         }
                     }
@@ -761,36 +842,48 @@ void i_issue(){
         }
     }
 }
-
+//execute instructions
 void ex_alu2(){
     buff_entry b = buf2[0];
     switch(b.opcode){
     case 4://SW
-        b.result = registers[b.dest] + b.offset;
+        b.result = prev_registers[b.dest] + b.offset;
         break;
     case 5://LW
-        b.result = registers[b.src1] + b.offset;
+        b.result = prev_registers[b.src1] + b.offset;
         break;
     }
     ins_buf6(b);
 }
 
+void ex_div(){
+    buff_entry b = buf3[0];
+    hiLo[0] = prev_registers[b.src1] / prev_registers[b.src2];
+    hiLo[1] = prev_registers[b.src1] % prev_registers[b.src2];
+    ins_buf7(b);
+}
+
 void ex_mem(){
+    char buff_funct[128];
     buff_entry b = buf6[0];
     switch(b.opcode){
     case 4://SW
-        data_map[b.result] = registers[b.src1];
+        data_map[b.result] = prev_registers[b.src1];
+        register_map[b.dest] = 0;
+        buf6.clear();
         break;
     case 5://LW
-        if(data_map.find(b.result) != data_map.end()){
-            b.result = data_map[b.result];
+        if(prev_data.find(b.result) != prev_data.end()){
+            b.result = prev_data[b.result];
         }
         else{
-            b.result = registers[b.result];
+            b.result = prev_registers[b.result];
         }
+        sprintf(buff_funct, "[%d, R%d]", b.result, b.dest);
+        b.entry = std::string(buff_funct);
+        ins_buf10(b);
         break;
     }
-    ins_buf10(b);
 }
 
 void ex_mul1(){
@@ -808,7 +901,7 @@ void ex_mul3(){
     std::bitset<64> bresult;
     std::string hi, lo;
     buff_entry b = buf11[0];
-    bresult = std::bitset<64>(registers[b.src1] * registers[b.src2]);
+    bresult = std::bitset<64>(prev_registers[b.src1] * prev_registers[b.src2]);
     lo = (bresult << 32).to_string();
     lo = lo.substr(0, 32);
     hiLo[1] = std::bitset<32>(lo).to_ulong();
@@ -824,22 +917,22 @@ void ex_alu1(){
     case 2:
         switch(b.opcode){
         case 0: //ADD
-            b.result = registers[b.src1] + registers[b.src2];
+            b.result = prev_registers[b.src1] + prev_registers[b.src2];
             break;
         case 1: //SUB
-            b.result = registers[b.src1] - registers[b.src2];
+            b.result = prev_registers[b.src1] - prev_registers[b.src2];
             break;
         case 2: //AND
-            b.result = registers[b.src1] & registers[b.src2];
+            b.result = prev_registers[b.src1] & prev_registers[b.src2];
             break;
         case 3: //OR
-            b.result = registers[b.src1] | registers[b.src2];
+            b.result = prev_registers[b.src1] | prev_registers[b.src2];
             break;
         case 4: //SRL
-            b.result = (unsigned int)(registers[b.src1]) >> b.src2;
+            b.result = (unsigned int)(prev_registers[b.src1]) >> b.src2;
             break;
         case 5: //SRA
-            b.result = registers[b.src1] >> b.src2;
+            b.result = prev_registers[b.src1] >> b.src2;
             break;
         default:
             break;
@@ -848,13 +941,13 @@ void ex_alu1(){
     case 3:
         switch(b.opcode){
         case 0: //ADDI
-            b.result = registers[b.src1] + b.imm_val;
+            b.result = prev_registers[b.src1] + b.imm_val;
             break;
         case 1: //ANDI
-            b.result = registers[b.src1] & b.imm_val;
+            b.result = prev_registers[b.src1] & b.imm_val;
             break;
         case 2: //ORI
-            b.result = registers[b.src1] | b.imm_val;
+            b.result = prev_registers[b.src1] | b.imm_val;
             break;
         default:
             break;
@@ -947,44 +1040,68 @@ int main(int argc, char* argv[]){
     
     //Executing the instructions
     while(instructions_map.find(pc) != instructions_map.end()){
-        write_back();
-        if(buf10.empty() && !buf6.empty()){
-            ex_mem();
+        prev_data = data_map;
+        for(int i = 0; i < 32; i++){
+            prev_registers[i] = registers[i];
         }
-        if(buf6.empty() && !buf2.empty()){
-            ex_alu2();
-        }
-        if(buf12.empty() && !buf11.empty()){
+        prev_hiLo[0] = hiLo[0];
+        prev_hiLo[1] = hiLo[1];
+        prev_cycle p;
+        pbbuf = bbuf;
+        pbuf1 = buf1;
+        pbuf2 = buf2;
+        pbuf3 = buf3;
+        pbuf4 = buf4;
+        pbuf5 = buf5;
+        pbuf6 = buf6;
+        pbuf7 = buf7;
+        pbuf8 = buf8;
+        pbuf9 = buf9;
+        pbuf10 = buf10;
+        pbuf11 = buf11;
+        pbuf12 = buf12;
+        prev_dirty = register_map;
+
+        i_issue(); 
+        if(pbuf12.empty() && !pbuf11.empty()){
             ex_mul3();
         }
-        if(buf11.empty() && !buf8.empty()){
+        if(!pbuf8.empty()){
             ex_mul2();
         }
-        if(buf8.empty() && !buf4.empty()){
-            ex_mul1();
+        if(!pbuf4.empty()) {
+            if(prev_dirty[buf4[0].src1] == 0 && prev_dirty[buf4[0].src2] == 0)
+                ex_mul1();
         }
-        if(buf9.empty() && !buf5.empty()){
+        if(pbuf9.empty() && !pbuf5.empty()){
             ex_alu1();
         }
-        i_issue();
+        if(pbuf10.empty() && !pbuf6.empty()){
+            ex_mem();
+        }   
+        if(!pbuf2.empty()){
+            ex_alu2();
+        }
 
+          
         for(int i = 0; i < 4; i++){
             if(stalled == 0){
                 i_fetch(instructions_map[pc]);
                 pc += 4;
-                if(!bbuf.empty())
-                    b_waiting();
                 if(instructions_map.find(pc) == instructions_map.end())
                     break;
             } else {
                 break;
             }
+            
         }
-        if(!bbuf.empty())
-            b_waiting();
-        
         
         simulation_output();
+        b_waiting();
+        write_back(); 
+        
+        
+             
         
         counter++;
     }
